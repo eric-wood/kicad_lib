@@ -161,6 +161,20 @@ impl Parser {
         self.expect_list_with_name(name)?.expect_string()
     }
 
+    pub fn expect_symbol_or_string_with_name(
+        &mut self,
+        name: &str,
+    ) -> Result<String, KiCadParseError> {
+        let next = self.expect_list_with_name(name)?.expect_next()?;
+        match next {
+            Sexpr::String(string) => Ok(string),
+            Sexpr::Symbol(string) => Ok(string),
+            _ => Err(KiCadParseError::UnexpectedSexprType {
+                expected: SexprKind::String,
+            }),
+        }
+    }
+
     /// Expects the next sexpr to be a number and returns it.
     ///
     /// If the next sexpr is not a number, an error is returned.
@@ -174,6 +188,18 @@ impl Parser {
         };
 
         Ok(number)
+    }
+
+    pub fn expect_bool(&mut self) -> Result<bool, KiCadParseError> {
+        let symbol = self.expect_symbol()?;
+        match symbol.as_str() {
+            "yes" => Ok(true),
+            "no" => Ok(false),
+            _ => Err(KiCadParseError::InvalidEnumValue {
+                value: symbol,
+                enum_name: "bool",
+            }),
+        }
     }
 
     pub fn expect_number_with_name(&mut self, name: &str) -> Result<f32, KiCadParseError> {
@@ -414,6 +440,12 @@ impl Parser {
             .transpose()
     }
 
+    pub fn maybe_bool_with_name(&mut self, name: &str) -> Result<Option<bool>, KiCadParseError> {
+        self.maybe_list_with_name(name)
+            .map(|mut d| d.expect_bool())
+            .transpose()
+    }
+
     pub fn maybe_symbol_matching(&mut self, expected: &str) -> bool {
         let Some(symbol) = self.peek_symbol() else {
             return false;
@@ -467,6 +499,14 @@ pub trait ToSexpr {
 
 pub trait ToSexprWithName {
     fn to_sexpr_with_name(&self, name: &str) -> Sexpr;
+}
+
+pub trait ToNormalizedSexpr {
+    fn to_normalized_sexpr(&self) -> Sexpr;
+}
+
+pub trait ToNormalizedSexprWithName {
+    fn to_normalized_sexpr_with_name(&self, name: &str) -> Sexpr;
 }
 
 pub trait VecToMaybeSexprVec {

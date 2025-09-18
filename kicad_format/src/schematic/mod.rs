@@ -10,8 +10,8 @@ use crate::{
         Uuid, Vec2D,
     },
     convert::{
-        FromSexpr, MaybeFromSexpr, Parser, SexprListExt, ToSexpr, ToSexprWithName,
-        VecToMaybeSexprVec,
+        FromSexpr, MaybeFromSexpr, Parser, SexprListExt, ToNormalizedSexpr, ToSexpr,
+        ToSexprWithName, VecToMaybeSexprVec,
     },
     simple_maybe_from_sexpr, simple_to_from_string, KiCadParseError,
 };
@@ -55,6 +55,7 @@ simple_to_from_string! {
 pub struct SchematicFile {
     pub version: u32,
     pub generator: String,
+    pub generator_version: Option<String>,
     pub uuid: Uuid,
     pub page_settings: PageSettings,
     pub title_block: Option<TitleBlock>,
@@ -74,6 +75,7 @@ pub struct SchematicFile {
     pub symbols: Vec<Symbol>,
     pub sheets: Vec<Sheet>,
     pub sheet_instances: Option<Vec<SchematicSheetInstance>>,
+    pub embedded_fonts: Option<bool>,
 }
 
 impl FromSexpr for SchematicFile {
@@ -81,7 +83,8 @@ impl FromSexpr for SchematicFile {
         parser.expect_symbol_matching("kicad_sch")?;
 
         let version = parser.expect_number_with_name("version")? as u32;
-        let generator = parser.expect_symbol_with_name("generator")?;
+        let generator = parser.expect_symbol_or_string_with_name("generator")?;
+        let generator_version = parser.maybe_string_with_name("generator_version")?;
         let uuid = parser.expect::<Uuid>()?;
         let page_settings = parser.expect::<PageSettings>()?;
         let title_block = parser.maybe::<TitleBlock>()?;
@@ -116,12 +119,14 @@ impl FromSexpr for SchematicFile {
                 Ok::<_, KiCadParseError>(instances)
             })
             .transpose()?;
+        let embedded_fonts = parser.maybe_bool_with_name("embedded_fonts")?;
 
         parser.expect_end()?;
 
         Ok(Self {
             version,
             generator,
+            generator_version,
             uuid,
             page_settings,
             title_block,
@@ -141,19 +146,47 @@ impl FromSexpr for SchematicFile {
             symbols,
             sheets,
             sheet_instances,
+            embedded_fonts,
         })
     }
 }
 
 impl ToSexpr for SchematicFile {
     fn to_sexpr(&self) -> kicad_sexpr::Sexpr {
+        // Around v8, a normalization effort took place and many core fields are serialized
+        // differently. The existence of the `generator_version` field is a signal that we're
+        // working with the updated format, and can follow those rules instead.
+        let is_normalized = self.generator_version.is_some();
+
+        let generator = if is_normalized {
+            Sexpr::string_with_name("generator", &self.generator)
+        } else {
+            Sexpr::symbol_with_name("generator", &self.generator)
+        };
+
+        let generator_version = self
+            .generator_version
+            .as_ref()
+            .map(|gv| Sexpr::string_with_name("generator_version", gv));
+
+        let uuid = if is_normalized {
+            self.uuid.to_normalized_sexpr()
+        } else {
+            self.uuid.to_sexpr()
+        };
+
+        let embedded_fonts = self
+            .embedded_fonts
+            .map(|value| Sexpr::bool_with_name("embedded_fonts", value));
+
         Sexpr::list_with_name(
             "kicad_sch",
             [
                 &[
                     Some(Sexpr::number_with_name("version", self.version as f32)),
-                    Some(Sexpr::symbol_with_name("generator", &self.generator)),
-                    Some(self.uuid.to_sexpr()),
+                    Some(generator),
+                    generator_version,
+                    Some(uuid),
                     Some(self.page_settings.to_sexpr()),
                     self.title_block.as_ref().map(ToSexpr::to_sexpr),
                     Some(Sexpr::list_with_name(
@@ -179,6 +212,7 @@ impl ToSexpr for SchematicFile {
                     .sheet_instances
                     .as_ref()
                     .map(|s| Sexpr::list_with_name("sheet_instances", s.into_sexpr_vec()))][..],
+                &[embedded_fonts][..],
             ]
             .concat(),
         )

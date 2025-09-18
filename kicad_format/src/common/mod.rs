@@ -7,7 +7,7 @@ use kicad_sexpr::{Sexpr, SexprList};
 use crate::{
     convert::{
         FromSexpr, FromSexprWithName, MaybeFromSexpr, MaybeFromSexprWithName, Parser, SexprListExt,
-        ToSexpr, ToSexprWithName, VecToMaybeSexprVec,
+        ToNormalizedSexpr, ToNormalizedSexprWithName, ToSexpr, ToSexprWithName, VecToMaybeSexprVec,
     },
     simple_maybe_from_sexpr, simple_to_from_string, KiCadParseError,
 };
@@ -888,7 +888,14 @@ impl FromSexprWithName for Uuid {
     fn from_sexpr_with_name(mut parser: Parser, name: &str) -> Result<Self, KiCadParseError> {
         parser.expect_symbol_matching(name)?;
 
-        let uuid = parser.expect_symbol()?.parse()?;
+        let uuid_str = match parser.peek_next() {
+            Some(Sexpr::String(_)) => parser.expect_string(),
+            Some(Sexpr::Symbol(_)) => parser.expect_symbol(),
+            _ => Err(KiCadParseError::UnexpectedSexprType {
+                expected: crate::SexprKind::Symbol,
+            }),
+        };
+        let uuid = uuid_str?.parse()?;
 
         Ok(Self(uuid))
     }
@@ -905,6 +912,18 @@ impl ToSexpr for Uuid {
 impl ToSexprWithName for Uuid {
     fn to_sexpr_with_name(&self, name: &str) -> Sexpr {
         Sexpr::list_with_name(name, [Some(Sexpr::symbol(self.to_string()))])
+    }
+}
+
+impl ToNormalizedSexpr for Uuid {
+    fn to_normalized_sexpr(&self) -> Sexpr {
+        self.to_normalized_sexpr_with_name("uuid")
+    }
+}
+
+impl ToNormalizedSexprWithName for Uuid {
+    fn to_normalized_sexpr_with_name(&self, name: &str) -> Sexpr {
+        Sexpr::list_with_name(name, [Some(Sexpr::string(self.to_string()))])
     }
 }
 
