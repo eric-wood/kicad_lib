@@ -4,7 +4,10 @@ use kicad_sexpr::Sexpr;
 
 use crate::{
     common::{symbol::SymbolProperty, Color, Position, Stroke, TextEffects, Uuid, Vec2D},
-    convert::{FromSexpr, Parser, SexprListExt, ToSexpr, ToSexprWithName, VecToMaybeSexprVec},
+    convert::{
+        FromSexpr, Parser, SerializationContext, SexprListExt, ToSexpr, ToSexprWithName,
+        VecToMaybeSexprVec,
+    },
     simple_maybe_from_sexpr, KiCadParseError,
 };
 
@@ -31,7 +34,7 @@ impl FromSexpr for Sheet {
 
         let position = parser.expect::<Position>()?;
         let size = parser.expect_with_name::<Vec2D>("size")?;
-        let fields_autoplaced = parser.maybe_empty_list_with_name("fields_autoplaced")?;
+        let fields_autoplaced = parser.maybe_symbol_with_optional_boolean("fields_autoplaced");
         let stroke = parser.expect::<Stroke>()?;
         let fill = parser.expect_list_with_name("fill").and_then(|mut p| {
             let color = p.expect::<Color>()?;
@@ -71,25 +74,35 @@ impl FromSexpr for Sheet {
 simple_maybe_from_sexpr!(Sheet, sheet);
 
 impl ToSexpr for Sheet {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
+        let fields_autoplaced = if context.explicit_booleans {
+            self.fields_autoplaced
+                .then(|| Sexpr::symbol_with_name("fields_autoplaced", "yes"))
+        } else {
+            self.fields_autoplaced
+                .then(|| Sexpr::list_with_name("fields_autoplaced", []))
+        };
+
         Sexpr::list_with_name(
             "sheet",
             [
                 &[
-                    Some(self.position.to_sexpr()),
-                    Some(self.size.to_sexpr_with_name("size")),
-                    self.fields_autoplaced
-                        .then(|| Sexpr::list_with_name("fields_autoplaced", [])),
-                    Some(self.stroke.to_sexpr()),
-                    Some(Sexpr::list_with_name("fill", [Some(self.fill.to_sexpr())])),
-                    Some(self.uuid.to_sexpr()),
+                    Some(self.position.to_sexpr(context)),
+                    Some(self.size.to_sexpr_with_name("size", context)),
+                    fields_autoplaced,
+                    Some(self.stroke.to_sexpr(context)),
+                    Some(Sexpr::list_with_name(
+                        "fill",
+                        [Some(self.fill.to_sexpr(context))],
+                    )),
+                    Some(self.uuid.to_sexpr(context)),
                 ][..],
-                &self.properties.into_sexpr_vec(),
-                &self.pins.into_sexpr_vec(),
+                &self.properties.into_sexpr_vec(context),
+                &self.pins.into_sexpr_vec(context),
                 &[self
                     .instances
                     .as_ref()
-                    .map(|i| Sexpr::list_with_name("instances", i.into_sexpr_vec()))][..],
+                    .map(|i| Sexpr::list_with_name("instances", i.into_sexpr_vec(context)))][..],
             ]
             .concat(),
         )
@@ -133,15 +146,15 @@ impl FromSexpr for SheetHierarchicalPin {
 simple_maybe_from_sexpr!(SheetHierarchicalPin, pin);
 
 impl ToSexpr for SheetHierarchicalPin {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "pin",
             [
                 Some(Sexpr::string(&self.name)),
                 Some(Sexpr::symbol(self.shape)),
-                Some(self.position.to_sexpr()),
-                Some(self.effects.to_sexpr()),
-                Some(self.uuid.to_sexpr()),
+                Some(self.position.to_sexpr(context)),
+                Some(self.effects.to_sexpr(context)),
+                Some(self.uuid.to_sexpr(context)),
             ],
         )
     }
@@ -183,7 +196,7 @@ impl FromSexpr for SheetInstance {
 simple_maybe_from_sexpr!(SheetInstance, project);
 
 impl ToSexpr for SheetInstance {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, _context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "project",
             [

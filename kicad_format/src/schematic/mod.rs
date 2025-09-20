@@ -10,7 +10,7 @@ use crate::{
         Uuid, Vec2D,
     },
     convert::{
-        FromSexpr, MaybeFromSexpr, Parser, SexprListExt, ToNormalizedSexpr, ToSexpr,
+        FromSexpr, MaybeFromSexpr, Parser, SerializationContext, SexprListExt, ToSexpr,
         ToSexprWithName, VecToMaybeSexprVec,
     },
     simple_maybe_from_sexpr, simple_to_from_string, KiCadParseError,
@@ -152,11 +152,16 @@ impl FromSexpr for SchematicFile {
 }
 
 impl ToSexpr for SchematicFile {
-    fn to_sexpr(&self) -> kicad_sexpr::Sexpr {
+    fn to_sexpr(&self, _context: SerializationContext) -> kicad_sexpr::Sexpr {
         // Around v8, a normalization effort took place and many core fields are serialized
         // differently. The existence of the `generator_version` field is a signal that we're
         // working with the updated format, and can follow those rules instead.
         let is_normalized = self.generator_version.is_some();
+        let context = if is_normalized {
+            SerializationContext::default()
+        } else {
+            SerializationContext::pre_v8()
+        };
 
         let generator = if is_normalized {
             Sexpr::string_with_name("generator", &self.generator)
@@ -169,12 +174,6 @@ impl ToSexpr for SchematicFile {
             .as_ref()
             .map(|gv| Sexpr::string_with_name("generator_version", gv));
 
-        let uuid = if is_normalized {
-            self.uuid.to_normalized_sexpr()
-        } else {
-            self.uuid.to_sexpr()
-        };
-
         let embedded_fonts = self
             .embedded_fonts
             .map(|value| Sexpr::bool_with_name("embedded_fonts", value));
@@ -186,32 +185,33 @@ impl ToSexpr for SchematicFile {
                     Some(Sexpr::number_with_name("version", self.version as f32)),
                     Some(generator),
                     generator_version,
-                    Some(uuid),
-                    Some(self.page_settings.to_sexpr()),
-                    self.title_block.as_ref().map(ToSexpr::to_sexpr),
+                    Some(self.uuid.to_sexpr(context)),
+                    Some(self.page_settings.to_sexpr(context)),
+                    self.title_block.as_ref().map(|i| i.to_sexpr(context)),
                     Some(Sexpr::list_with_name(
                         "lib_symbols",
-                        self.lib_symbols.into_sexpr_vec(),
+                        self.lib_symbols.into_sexpr_vec(context),
                     )),
                 ][..],
-                &self.bus_aliases.into_sexpr_vec(),
-                &self.junctions.into_sexpr_vec(),
-                &self.no_connects.into_sexpr_vec(),
-                &self.bus_entries.into_sexpr_vec(),
-                &self.lines.into_sexpr_vec(),
-                &self.shapes.into_sexpr_vec(),
-                &self.images.into_sexpr_vec(),
-                &self.text_boxes.into_sexpr_vec(),
-                &self.texts.into_sexpr_vec(),
-                &self.local_labels.into_sexpr_vec(),
-                &self.global_labels.into_sexpr_vec(),
-                &self.hierarchical_labels.into_sexpr_vec(),
-                &self.symbols.into_sexpr_vec(),
-                &self.sheets.into_sexpr_vec(),
+                &self.bus_aliases.into_sexpr_vec(context),
+                &self.junctions.into_sexpr_vec(context),
+                &self.no_connects.into_sexpr_vec(context),
+                &self.bus_entries.into_sexpr_vec(context),
+                &self.lines.into_sexpr_vec(context),
+                &self.shapes.into_sexpr_vec(context),
+                &self.images.into_sexpr_vec(context),
+                &self.text_boxes.into_sexpr_vec(context),
+                &self.texts.into_sexpr_vec(context),
+                &self.local_labels.into_sexpr_vec(context),
+                &self.global_labels.into_sexpr_vec(context),
+                &self.hierarchical_labels.into_sexpr_vec(context),
+                &self.symbols.into_sexpr_vec(context),
+                &self.sheets.into_sexpr_vec(context),
                 &[self
                     .sheet_instances
                     .as_ref()
-                    .map(|s| Sexpr::list_with_name("sheet_instances", s.into_sexpr_vec()))][..],
+                    .map(|s| Sexpr::list_with_name("sheet_instances", s.into_sexpr_vec(context)))]
+                    [..],
                 &[embedded_fonts][..],
             ]
             .concat(),
@@ -249,7 +249,7 @@ impl FromSexpr for BusAlias {
 simple_maybe_from_sexpr!(BusAlias, bus_alias);
 
 impl ToSexpr for BusAlias {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, _context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "bus_alias",
             [
@@ -300,14 +300,14 @@ impl FromSexpr for Junction {
 simple_maybe_from_sexpr!(Junction, junction);
 
 impl ToSexpr for Junction {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "junction",
             [
-                Some(self.position.to_sexpr()),
+                Some(self.position.to_sexpr(context)),
                 Some(Sexpr::number_with_name("diameter", self.diameter)),
-                Some(self.color.to_sexpr()),
-                Some(self.uuid.to_sexpr()),
+                Some(self.color.to_sexpr(context)),
+                Some(self.uuid.to_sexpr(context)),
             ],
         )
     }
@@ -337,10 +337,13 @@ impl FromSexpr for NoConnect {
 simple_maybe_from_sexpr!(NoConnect, no_connect);
 
 impl ToSexpr for NoConnect {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "no_connect",
-            [Some(self.position.to_sexpr()), Some(self.uuid.to_sexpr())],
+            [
+                Some(self.position.to_sexpr(context)),
+                Some(self.uuid.to_sexpr(context)),
+            ],
         )
     }
 }
@@ -378,14 +381,14 @@ impl FromSexpr for BusEntry {
 simple_maybe_from_sexpr!(BusEntry, bus_entry);
 
 impl ToSexpr for BusEntry {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "bus_entry",
             [
-                Some(self.position.to_sexpr()),
-                Some(self.size.to_sexpr_with_name("size")),
-                Some(self.stroke.to_sexpr()),
-                Some(self.uuid.to_sexpr()),
+                Some(self.position.to_sexpr(context)),
+                Some(self.size.to_sexpr_with_name("size", context)),
+                Some(self.stroke.to_sexpr(context)),
+                Some(self.uuid.to_sexpr(context)),
             ],
         )
     }
@@ -430,13 +433,13 @@ impl MaybeFromSexpr for SchematicLine {
 }
 
 impl ToSexpr for SchematicLine {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             self.kind.to_string(),
             [
-                Some(self.points.to_sexpr()),
-                Some(self.stroke.to_sexpr()),
-                Some(self.uuid.to_sexpr()),
+                Some(self.points.to_sexpr(context)),
+                Some(self.stroke.to_sexpr(context)),
+                Some(self.uuid.to_sexpr(context)),
             ],
         )
     }
@@ -500,17 +503,17 @@ impl FromSexpr for SchematicTextBox {
 simple_maybe_from_sexpr!(SchematicTextBox, text_box);
 
 impl ToSexpr for SchematicTextBox {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "text_box",
             [
                 Some(Sexpr::string(&self.text)),
-                Some(self.position.to_sexpr()),
-                Some(self.size.to_sexpr_with_name("size")),
-                Some(self.stroke.to_sexpr()),
-                Some(self.fill.to_sexpr()),
-                Some(self.effects.to_sexpr()),
-                self.uuid.as_ref().map(ToSexpr::to_sexpr),
+                Some(self.position.to_sexpr(context)),
+                Some(self.size.to_sexpr_with_name("size", context)),
+                Some(self.stroke.to_sexpr(context)),
+                Some(self.fill.to_sexpr(context)),
+                Some(self.effects.to_sexpr(context)),
+                self.uuid.as_ref().map(|i| i.to_sexpr(context)),
             ],
         )
     }
@@ -521,6 +524,7 @@ impl ToSexpr for SchematicTextBox {
 #[derive(Debug, PartialEq, Clone)]
 pub struct SchematicText {
     pub text: String,
+    pub exclude_from_sim: Option<bool>,
     pub position: Position,
     pub effects: TextEffects,
     pub uuid: Uuid,
@@ -531,6 +535,7 @@ impl FromSexpr for SchematicText {
         parser.expect_symbol_matching("text")?;
 
         let text = parser.expect_string()?;
+        let exclude_from_sim = parser.maybe_bool_with_name("exclude_from_sim")?;
         let position = parser.expect::<Position>()?;
         let effects = parser.expect::<TextEffects>()?;
         let uuid = parser.expect::<Uuid>()?;
@@ -539,6 +544,7 @@ impl FromSexpr for SchematicText {
 
         Ok(Self {
             text,
+            exclude_from_sim,
             position,
             effects,
             uuid,
@@ -549,14 +555,14 @@ impl FromSexpr for SchematicText {
 simple_maybe_from_sexpr!(SchematicText, text);
 
 impl ToSexpr for SchematicText {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "text",
             [
                 Some(Sexpr::string(&self.text)),
-                Some(self.position.to_sexpr()),
-                Some(self.effects.to_sexpr()),
-                Some(self.uuid.to_sexpr()),
+                Some(self.position.to_sexpr(context)),
+                Some(self.effects.to_sexpr(context)),
+                Some(self.uuid.to_sexpr(context)),
             ],
         )
     }
@@ -580,7 +586,7 @@ impl FromSexpr for LocalLabel {
 
         let text = parser.expect_string()?;
         let position = parser.expect::<Position>()?;
-        let fields_autoplaced = parser.maybe_empty_list_with_name("fields_autoplaced")?;
+        let fields_autoplaced = parser.maybe_symbol_with_optional_boolean("fields_autoplaced");
         let effects = parser.expect::<TextEffects>()?;
         let uuid = parser.expect::<Uuid>()?;
         let properties = parser.expect_many::<SymbolProperty>()?;
@@ -601,19 +607,26 @@ impl FromSexpr for LocalLabel {
 simple_maybe_from_sexpr!(LocalLabel, label);
 
 impl ToSexpr for LocalLabel {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
+        let fields_autoplaced = if context.explicit_booleans {
+            self.fields_autoplaced
+                .then(|| Sexpr::symbol_with_name("fields_autoplaced", "yes"))
+        } else {
+            self.fields_autoplaced
+                .then(|| Sexpr::list_with_name("fields_autoplaced", []))
+        };
+
         Sexpr::list_with_name(
             "label",
             [
                 &[
                     Some(Sexpr::string(&self.text)),
-                    Some(self.position.to_sexpr()),
-                    self.fields_autoplaced
-                        .then(|| Sexpr::list_with_name("fields_autoplaced", [])),
-                    Some(self.effects.to_sexpr()),
-                    Some(self.uuid.to_sexpr()),
+                    Some(self.position.to_sexpr(context)),
+                    fields_autoplaced,
+                    Some(self.effects.to_sexpr(context)),
+                    Some(self.uuid.to_sexpr(context)),
                 ][..],
-                &self.properties.into_sexpr_vec(),
+                &self.properties.into_sexpr_vec(context),
             ]
             .concat(),
         )
@@ -642,7 +655,7 @@ impl FromSexpr for GlobalLabel {
             .expect_symbol_with_name("shape")?
             .parse::<SheetPinShape>()?;
         let position = parser.expect::<Position>()?;
-        let fields_autoplaced = parser.maybe_empty_list_with_name("fields_autoplaced")?;
+        let fields_autoplaced = parser.maybe_symbol_with_optional_boolean("fields_autoplaced");
         let effects = parser.expect::<TextEffects>()?;
         let uuid = parser.expect::<Uuid>()?;
         let properties = parser.expect_many::<SymbolProperty>()?;
@@ -664,20 +677,27 @@ impl FromSexpr for GlobalLabel {
 simple_maybe_from_sexpr!(GlobalLabel, global_label);
 
 impl ToSexpr for GlobalLabel {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
+        let fields_autoplaced = if context.explicit_booleans {
+            self.fields_autoplaced
+                .then(|| Sexpr::symbol_with_name("fields_autoplaced", "yes"))
+        } else {
+            self.fields_autoplaced
+                .then(|| Sexpr::list_with_name("fields_autoplaced", []))
+        };
+
         Sexpr::list_with_name(
             "global_label",
             [
                 &[
                     Some(Sexpr::string(&self.text)),
                     Some(Sexpr::symbol_with_name("shape", self.shape)),
-                    Some(self.position.to_sexpr()),
-                    self.fields_autoplaced
-                        .then(|| Sexpr::list_with_name("fields_autoplaced", [])),
-                    Some(self.effects.to_sexpr()),
-                    Some(self.uuid.to_sexpr()),
+                    Some(self.position.to_sexpr(context)),
+                    fields_autoplaced,
+                    Some(self.effects.to_sexpr(context)),
+                    Some(self.uuid.to_sexpr(context)),
                 ][..],
-                &self.properties.into_sexpr_vec(),
+                &self.properties.into_sexpr_vec(context),
             ]
             .concat(),
         )
@@ -707,7 +727,7 @@ impl FromSexpr for HierarchicalLabel {
             .expect_symbol_with_name("shape")?
             .parse::<SheetPinShape>()?;
         let position = parser.expect::<Position>()?;
-        let fields_autoplaced = parser.maybe_empty_list_with_name("fields_autoplaced")?;
+        let fields_autoplaced = parser.maybe_symbol_with_optional_boolean("fields_autoplaced");
         let effects = parser.expect::<TextEffects>()?;
         let uuid = parser.expect::<Uuid>()?;
         let properties = parser.expect_many::<SymbolProperty>()?;
@@ -729,20 +749,27 @@ impl FromSexpr for HierarchicalLabel {
 simple_maybe_from_sexpr!(HierarchicalLabel, hierarchical_label);
 
 impl ToSexpr for HierarchicalLabel {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, context: SerializationContext) -> Sexpr {
+        let fields_autoplaced = if context.explicit_booleans {
+            self.fields_autoplaced
+                .then(|| Sexpr::symbol_with_name("fields_autoplaced", "yes"))
+        } else {
+            self.fields_autoplaced
+                .then(|| Sexpr::list_with_name("fields_autoplaced", []))
+        };
+
         Sexpr::list_with_name(
             "hierarchical_label",
             [
                 &[
                     Some(Sexpr::string(&self.text)),
                     Some(Sexpr::symbol_with_name("shape", self.shape)),
-                    Some(self.position.to_sexpr()),
-                    self.fields_autoplaced
-                        .then(|| Sexpr::list_with_name("fields_autoplaced", [])),
-                    Some(self.effects.to_sexpr()),
-                    Some(self.uuid.to_sexpr()),
+                    Some(self.position.to_sexpr(context)),
+                    fields_autoplaced,
+                    Some(self.effects.to_sexpr(context)),
+                    Some(self.uuid.to_sexpr(context)),
                 ][..],
-                &self.properties.into_sexpr_vec(),
+                &self.properties.into_sexpr_vec(context),
             ]
             .concat(),
         )
@@ -773,7 +800,7 @@ impl FromSexpr for SchematicSheetInstance {
 simple_maybe_from_sexpr!(SchematicSheetInstance, path);
 
 impl ToSexpr for SchematicSheetInstance {
-    fn to_sexpr(&self) -> Sexpr {
+    fn to_sexpr(&self, _context: SerializationContext) -> Sexpr {
         Sexpr::list_with_name(
             "path",
             [
